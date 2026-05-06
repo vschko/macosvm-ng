@@ -42,6 +42,14 @@
 - (nullable _VZDebugStub *)_debugStub;
 @end
 
+#ifdef MACOS_GUEST
+@interface VZMacAuxiliaryStorage (VZPrivate)
+- (BOOL)_setDataValue:(NSData * _Nonnull)value
+forNVRAMVariableNamed:(NSString * _Nonnull)name
+                error:(NSError * _Nullable * _Nullable)error;
+@end
+#endif
+
 @interface VMSpec : VZVirtualMachineConfiguration {
     NSData  *machineIdentifierData, *hardwareModelData;
     NSArray *storage;
@@ -58,6 +66,8 @@
     /* macos / linux */
     NSDictionary *bootInfo;
     /* Linux: kernel, parameters */
+    NSString *bootArgs;
+    /* macOS: boot-args NVRAM variable */
 
     NSString *ptyPath; /* internally generated */
 @public
@@ -91,6 +101,7 @@
 - (void) addAutomountDirectoryShares: (NSArray*) paths readOnly: (BOOL) readOnly;
 - (void) setPrimaryMAC: (NSString*) mac;
 - (void) setSpawnScript: (NSString*) mac;
+- (void) setBootArgs: (NSString * _Nonnull) args;
 - (instancetype) configure;
 - (void) cloneAllStorage;
 

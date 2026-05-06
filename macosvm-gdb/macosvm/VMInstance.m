@@ -34,6 +34,7 @@ static GDBStubDelegate *_gdbDelegate = nil;
     ram = 0;
     os = nil;
     bootInfo = nil;
+    bootArgs = nil;
     audio = NO;
 #ifdef MACOS_GUEST
     _restoreImage = nil;
@@ -71,6 +72,9 @@ static GDBStubDelegate *_gdbDelegate = nil;
     tmp = root[@"bootInfo"];
     if (tmp && [tmp isKindOfClass:[NSDictionary class]])
         bootInfo = tmp;
+    tmp = root[@"bootArgs"];
+    if (tmp && [tmp isKindOfClass:[NSString class]])
+        bootArgs = tmp;
     tmp = root[@"networks"];
     if (tmp && [tmp isKindOfClass:[NSArray class]])
         networks = tmp;
@@ -105,6 +109,8 @@ static GDBStubDelegate *_gdbDelegate = nil;
         [root setObject:[hardwareModelData base64EncodedStringWithOptions:0] forKey:@"hardwareModel"];
     if (bootInfo)
         [root setObject:bootInfo forKey:@"bootInfo"];
+    if (bootArgs)
+        [root setObject:bootArgs forKey:@"bootArgs"];
     if (machineIdentifierData)
         [root setObject:[machineIdentifierData base64EncodedStringWithOptions:0] forKey:@"machineId"];
     if (displays)
@@ -214,6 +220,10 @@ static GDBStubDelegate *_gdbDelegate = nil;
 
 - (void) setSpawnScript: (NSString*) script {
     spawnScript = [script retain];
+}
+
+- (void) setBootArgs: (NSString*) args {
+    bootArgs = [args retain];
 }
 
 - (void) addNetwork: (NSString*) type interface: (NSString*) iface {
@@ -760,6 +770,18 @@ void add_unlink_on_exit(const char *fn); /* from main.m - a bit hacky but more s
                         [[VZMacAuxiliaryStorage alloc] initCreatingStorageAtURL: imageURL hardwareModel:hwm options:VZMacAuxiliaryStorageInitializationOptionAllowOverwrite error:&err];
                     if (err)
                         @throw [NSException exceptionWithName:@"VMConfigAuxStorageError" reason:[err description] userInfo:nil];
+                    if (bootArgs) {
+                        NSData *bootArgsData = [bootArgs dataUsingEncoding:NSUTF8StringEncoding];
+                        NSError *nvramErr = nil;
+                        BOOL ok = [aux _setDataValue:bootArgsData
+                               forNVRAMVariableNamed:@"boot-args"
+                                               error:&nvramErr];
+                        if (!ok || nvramErr) {
+                            NSString *reason = nvramErr ? [nvramErr description] : @"failed to set boot-args";
+                            @throw [NSException exceptionWithName:@"VMConfigNVRAMError" reason:reason userInfo:nil];
+                        }
+                        NSLog(@" + NVRAM boot-args: %@", bootArgs);
+                    }
                     macPlatform.auxiliaryStorage = aux;
                 } else
 #endif

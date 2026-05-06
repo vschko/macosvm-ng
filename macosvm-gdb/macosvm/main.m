@@ -375,7 +375,7 @@ int main(int ac, char**av) {
 
     /* options that require an argument so we can skip them */
     const char *multi_options[] = {
-        "--restore", "--vol", "--disk", "--usb", "--aux", "--initrd", "--net", "--save", "--mac", "--script", "--pid-file", "--gdb", 0
+        "--restore", "--vol", "--disk", "--usb", "--aux", "--initrd", "--net", "--save", "--mac", "--script", "--pid-file", "--gdb", "--boot-args", 0
     };
     /* in retrospect this was a bad idea, but we have to find the config file
        first since we want the options to override the contents of the config
@@ -602,9 +602,18 @@ int main(int ac, char**av) {
                     fprintf(stderr, "ERROR: %s missing script name\n", av[i - 1]);
                     return 1;
                 }
-		[spec setSpawnScript: [NSString stringWithUTF8String:av[i]]];
-		continue;
-	    }
+                [spec setSpawnScript: [NSString stringWithUTF8String:av[i]]];
+                continue;
+            }
+            if (!strcmp(av[i], "--boot-args")) {
+                if (++i >= ac) {
+                    fprintf(stderr, "ERROR: %s missing boot arguments\n", av[i - 1]);
+                    return 1;
+                }
+                [spec setBootArgs: [NSString stringWithUTF8String:av[i]]];
+                printf("INFO: macOS boot-args: %s\n", av[i]);
+                continue;
+            }
             if (!strcmp(av[i], "--gdb")) {
                 if (++i >= ac) {
                     fprintf(stderr, "ERROR: %s missing port number\n", av[i-1]);
@@ -725,7 +734,7 @@ int main(int ac, char**av) {
            [--{disk|usb} <path>[,ro][,size=<spec>][,keep]] [--aux <path>]\n\
            [--vol <path>[,ro][,{name=<name>|automount}]]\n\
            [--net <spec>] [--mac <addr>] [-c <cpus>] [-r <ram>]\n\
-           [--gdb <port>[,all]] [--no-serial] [--pty]\n\
+           [--gdb <port>[,all]] [--boot-args <args>] [--no-serial] [--pty]\n\
            [--pid-file <path>] [--script <cmd>]\n\
            <config.json>\n\
         %s --version\n\
@@ -747,6 +756,8 @@ int main(int ac, char**av) {
  --gdb <port>[,all] attaches a GDB debug stub (private Virtualization API).\n\
  After the VM boots, connect with: lldb -o \"gdb-remote localhost:<port>\"\n\
  Add ',all' to listen on all interfaces (default: localhost only).\n\
+ For kernel stepping/breakpoints on arm64 macOS guests, combine it with\n\
+ --boot-args \"debug=0x14e -v\" or --boot-args \"serial=3 debug=0x104c04\".\n\
 \n\
  Note that the --mac option is special and will override the first interface\n\
  from the configuration file and/or --net (typically used with --ephemeral).\n\
