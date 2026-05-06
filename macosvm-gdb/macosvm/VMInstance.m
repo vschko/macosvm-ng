@@ -44,6 +44,7 @@ static GDBStubDelegate *_gdbDelegate = nil;
     spice = NO;
     gdb_port = 0;
     gdb_listen_all = NO;
+    gdb_delegate_hvc = YES;
     ptyPath = nil;
     spawnScript = nil;
     return self;
@@ -915,6 +916,11 @@ void add_unlink_on_exit(const char *fn); /* from main.m - a bit hacky but more s
     if (@available(macOS 13.0, *)) {
         VZMacOSVirtualMachineStartOptions *opts = [[VZMacOSVirtualMachineStartOptions alloc] init];
         opts.startUpFromMacOSRecovery = _spec->use_recovery;
+        if (_spec->gdb_port && _spec->gdb_delegate_hvc &&
+            [opts respondsToSelector:@selector(_setDelegatedExceptionClasses:)]) {
+            [opts _setDelegatedExceptionClasses:@[@(0x16)]];
+            NSLog(@"starting with delegated HVC exception class (0x16) for GDB stub");
+        }
         NSLog(@"starting macOS in %@ mode", _spec->use_recovery ? @"recovery" : @"normal");
         [_virtualMachine startWithOptions:opts completionHandler:completionHandler];
     } else

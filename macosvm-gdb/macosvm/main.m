@@ -632,6 +632,10 @@ int main(int ac, char**av) {
                         spec->gdb_listen_all = YES;
                     else if (!strncmp(dop, "local", 5))
                         spec->gdb_listen_all = NO;
+                    else if (!strncmp(dop, "hvc", 3))
+                        spec->gdb_delegate_hvc = YES;
+                    else if (!strncmp(dop, "no-hvc", 6))
+                        spec->gdb_delegate_hvc = NO;
                     else {
                         fprintf(stderr, "ERROR: invalid --gdb option: '%s'\n", dop);
                         return 1;
@@ -734,7 +738,7 @@ int main(int ac, char**av) {
            [--{disk|usb} <path>[,ro][,size=<spec>][,keep]] [--aux <path>]\n\
            [--vol <path>[,ro][,{name=<name>|automount}]]\n\
            [--net <spec>] [--mac <addr>] [-c <cpus>] [-r <ram>]\n\
-           [--gdb <port>[,all]] [--boot-args <args>] [--no-serial] [--pty]\n\
+           [--gdb <port>[,all][,no-hvc]] [--boot-args <args>] [--no-serial] [--pty]\n\
            [--pid-file <path>] [--script <cmd>]\n\
            <config.json>\n\
         %s --version\n\
@@ -753,9 +757,11 @@ int main(int ac, char**av) {
  (unix socket to which all network traffic will be routed).\n\
  Note that br requires special entitlement rarely given by Apple.\n\
 \n\
- --gdb <port>[,all] attaches a GDB debug stub (private Virtualization API).\n\
+ --gdb <port>[,all][,no-hvc] attaches a GDB debug stub (private Virtualization API).\n\
  After the VM boots, connect with: lldb -o \"gdb-remote localhost:<port>\"\n\
  Add ',all' to listen on all interfaces (default: localhost only).\n\
+ The VM start options delegate ARM64 HVC exception class 0x16 by default;\n\
+ add ',no-hvc' to disable that private start option.\n\
  For kernel stepping/breakpoints on arm64 macOS guests, combine it with\n\
  --boot-args \"debug=0x14e -v\" or --boot-args \"serial=3 debug=0x104c04\".\n\
 \n\

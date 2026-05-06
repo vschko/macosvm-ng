@@ -42,6 +42,10 @@
 - (nullable _VZDebugStub *)_debugStub;
 @end
 
+@interface VZVirtualMachineStartOptions (VZPrivate)
+- (void)_setDelegatedExceptionClasses:(NSArray<NSNumber *> * _Nonnull)classes;
+@end
+
 #ifdef MACOS_GUEST
 @interface VZMacAuxiliaryStorage (VZPrivate)
 - (BOOL)_setDataValue:(NSData * _Nonnull)value
@@ -76,6 +80,7 @@ forNVRAMVariableNamed:(NSString * _Nonnull)name
     BOOL audio, use_serial, pty, spice, use_recovery;
     unsigned short gdb_port;
     BOOL gdb_listen_all;
+    BOOL gdb_delegate_hvc;
     NSString *spawnScript;
 }
 
