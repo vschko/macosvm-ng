@@ -375,7 +375,7 @@ int main(int ac, char**av) {
 
     /* options that require an argument so we can skip them */
     const char *multi_options[] = {
-        "--restore", "--vol", "--disk", "--usb", "--aux", "--initrd", "--net", "--save", "--mac", "--script", "--pid-file", "--gdb", "--boot-args", 0
+        "--restore", "--vol", "--disk", "--usb", "--aux", "--initrd", "--net", "--save", "--mac", "--script", "--pid-file", "--gdb", "--boot-args", "--hardware-model", 0
     };
     /* in retrospect this was a bad idea, but we have to find the config file
        first since we want the options to override the contents of the config
@@ -614,6 +614,20 @@ int main(int ac, char**av) {
                 printf("INFO: macOS boot-args: %s\n", av[i]);
                 continue;
             }
+            if (!strcmp(av[i], "--hardware-model")) {
+                if (++i >= ac) {
+                    fprintf(stderr, "ERROR: %s missing hardware model specification\n", av[i - 1]);
+                    return 1;
+                }
+                NSError *err = nil;
+                if (![spec setHardwareModelSpecification:[NSString stringWithUTF8String:av[i]] error:&err]) {
+                    fprintf(stderr, "ERROR: invalid hardware model specification '%s': %s\n",
+                            av[i], err ? [[err localizedDescription] UTF8String] : "unknown error");
+                    return 1;
+                }
+                printf("INFO: private hardware model: %s\n", av[i]);
+                continue;
+            }
             if (!strcmp(av[i], "--gdb")) {
                 if (++i >= ac) {
                     fprintf(stderr, "ERROR: %s missing port number\n", av[i-1]);
@@ -738,7 +752,7 @@ int main(int ac, char**av) {
            [--{disk|usb} <path>[,ro][,size=<spec>][,keep]] [--aux <path>]\n\
            [--vol <path>[,ro][,{name=<name>|automount}]]\n\
            [--net <spec>] [--mac <addr>] [-c <cpus>] [-r <ram>]\n\
-           [--gdb <port>[,all][,no-hvc]] [--boot-args <args>] [--no-serial] [--pty]\n\
+           [--gdb <port>[,all][,no-hvc]] [--boot-args <args>] [--hardware-model <spec>] [--no-serial] [--pty]\n\
            [--pid-file <path>] [--script <cmd>]\n\
            <config.json>\n\
         %s --version\n\
@@ -764,6 +778,12 @@ int main(int ac, char**av) {
  add ',no-hvc' to disable that private start option.\n\
  For kernel stepping/breakpoints on arm64 macOS guests, combine it with\n\
  --boot-args \"debug=0x14e -v\" or --boot-args \"serial=3 debug=0x104c04\".\n\
+\n\
+ --hardware-model <spec> overrides the private Mac hardware model descriptor.\n\
+ Aliases: vphone, vresearch, pv3 (= pv=3,board=0x90,isa=2).\n\
+ Custom form: pv=<n>[,board=<hex>][,isa=<n>][,variant=<hex>:<name>].\n\
+ PV3 requires com.apple.private.virtualization.security-research and usually\n\
+ a fresh auxiliary storage file created with the same hardware model.\n\
 \n\
  Note that the --mac option is special and will override the first interface\n\
  from the configuration file and/or --net (typically used with --ephemeral).\n\

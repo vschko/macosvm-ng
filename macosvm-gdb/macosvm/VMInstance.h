@@ -47,6 +47,21 @@
 @end
 
 #ifdef MACOS_GUEST
+@interface _VZMacHardwareModelDescriptor : NSObject
+- (void)setPlatformVersion:(NSNumber * _Nonnull)version;
+- (void)setBoardID:(NSNumber * _Nonnull)boardID;
+- (void)setISA:(NSNumber * _Nonnull)isa;
+- (void)setVariantID:(unsigned int)variantID variantName:(NSString * _Nonnull)variantName;
+@end
+
+@interface VZMacHardwareModel (VZPrivate)
++ (instancetype _Nullable)_hardwareModelWithDescriptor:(_VZMacHardwareModelDescriptor * _Nonnull)descriptor;
+- (unsigned int)_boardID;
+- (long long)_isa;
+- (unsigned int)_variantID;
+- (NSString * _Nullable)_variantName;
+@end
+
 @interface VZMacAuxiliaryStorage (VZPrivate)
 - (BOOL)_setDataValue:(NSData * _Nonnull)value
 forNVRAMVariableNamed:(NSString * _Nonnull)name
@@ -72,6 +87,8 @@ forNVRAMVariableNamed:(NSString * _Nonnull)name
     /* Linux: kernel, parameters */
     NSString *bootArgs;
     /* macOS: boot-args NVRAM variable */
+    NSDictionary *hardwareModelOverride;
+    /* macOS: private hardware model descriptor override */
 
     NSString *ptyPath; /* internally generated */
 @public
@@ -107,6 +124,7 @@ forNVRAMVariableNamed:(NSString * _Nonnull)name
 - (void) setPrimaryMAC: (NSString*) mac;
 - (void) setSpawnScript: (NSString*) mac;
 - (void) setBootArgs: (NSString * _Nonnull) args;
+- (BOOL) setHardwareModelSpecification: (NSString * _Nonnull) spec error: (NSError * _Nullable * _Nullable) err;
 - (instancetype) configure;
 - (void) cloneAllStorage;
 

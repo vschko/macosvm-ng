@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <sys/errno.h>
 #include <sys/stat.h>
+#include <stdint.h>
+#include <stdlib.h>
 /* for socket networking */
 #include <sys/un.h>
 #include <sys/socket.h>
@@ -24,6 +26,28 @@
 
 static GDBStubDelegate *_gdbDelegate = nil;
 
+static NSString *trim_string(NSString *s) {
+    return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSError *vm_config_error(NSString *reason) {
+    return [NSError errorWithDomain:@"VMConfig"
+                               code:1
+                           userInfo:@{ NSLocalizedDescriptionKey: reason }];
+}
+
+static BOOL parse_uint64(NSString *s, unsigned long long *value) {
+    const char *str = [s UTF8String];
+    char *end = NULL;
+    errno = 0;
+    unsigned long long v = strtoull(str, &end, 0);
+    if (errno || !end || *end)
+        return NO;
+    if (value)
+        *value = v;
+    return YES;
+}
+
 @implementation VMSpec
 
 - (instancetype) init {
@@ -35,6 +59,7 @@ static GDBStubDelegate *_gdbDelegate = nil;
     os = nil;
     bootInfo = nil;
     bootArgs = nil;
+    hardwareModelOverride = nil;
     audio = NO;
 #ifdef MACOS_GUEST
     _restoreImage = nil;
@@ -76,6 +101,9 @@ static GDBStubDelegate *_gdbDelegate = nil;
     tmp = root[@"bootArgs"];
     if (tmp && [tmp isKindOfClass:[NSString class]])
         bootArgs = tmp;
+    tmp = root[@"hardwareModelOverride"];
+    if (tmp && [tmp isKindOfClass:[NSDictionary class]])
+        hardwareModelOverride = [tmp copy];
     tmp = root[@"networks"];
     if (tmp && [tmp isKindOfClass:[NSArray class]])
         networks = tmp;
@@ -112,6 +140,8 @@ static GDBStubDelegate *_gdbDelegate = nil;
         [root setObject:bootInfo forKey:@"bootInfo"];
     if (bootArgs)
         [root setObject:bootArgs forKey:@"bootArgs"];
+    if (hardwareModelOverride)
+        [root setObject:hardwareModelOverride forKey:@"hardwareModelOverride"];
     if (machineIdentifierData)
         [root setObject:[machineIdentifierData base64EncodedStringWithOptions:0] forKey:@"machineId"];
     if (displays)
@@ -225,6 +255,116 @@ static GDBStubDelegate *_gdbDelegate = nil;
 
 - (void) setBootArgs: (NSString*) args {
     bootArgs = [args retain];
+}
+
+- (BOOL) setHardwareModelSpecification: (NSString *) spec error: (NSError **) err {
+    NSString *s = trim_string(spec);
+    NSString *lower = [s lowercaseString];
+    if (![s length]) {
+        if (err) *err = vm_config_error(@"empty hardware model specification");
+        return NO;
+    }
+    if ([lower isEqualToString:@"default"] || [lower isEqualToString:@"auto"]) {
+        hardwareModelOverride = nil;
+        return YES;
+    }
+
+    NSMutableDictionary *override = [NSMutableDictionary dictionary];
+    if ([lower isEqualToString:@"vphone"] ||
+        [lower isEqualToString:@"vresearch"] ||
+        [lower isEqualToString:@"pv3"]) {
+        override[@"platformVersion"] = @3;
+        override[@"boardID"] = @(0x90);
+        override[@"isa"] = @2;
+        override[@"name"] = lower;
+        hardwareModelOverride = [override copy];
+        return YES;
+    }
+
+    NSArray *parts = [s componentsSeparatedByString:@","];
+    NSUInteger positional = 0;
+    for (NSString *rawPart in parts) {
+        NSString *part = trim_string(rawPart);
+        if (![part length])
+            continue;
+
+        NSString *key = nil;
+        NSString *value = nil;
+        NSRange eq = [part rangeOfString:@"="];
+        if (eq.location == NSNotFound) {
+            if (positional == 0)
+                key = @"pv";
+            else if (positional == 1)
+                key = @"board";
+            else if (positional == 2)
+                key = @"isa";
+            else {
+                if (err) *err = vm_config_error([NSString stringWithFormat:@"unexpected positional hardware model field '%@'", part]);
+                return NO;
+            }
+            value = part;
+            positional++;
+        } else {
+            key = trim_string([part substringToIndex:eq.location]);
+            value = trim_string([part substringFromIndex:eq.location + 1]);
+        }
+
+        NSString *normalizedKey = [[[key lowercaseString]
+            stringByReplacingOccurrencesOfString:@"-" withString:@""]
+            stringByReplacingOccurrencesOfString:@"_" withString:@""];
+        unsigned long long parsed = 0;
+        if ([normalizedKey isEqualToString:@"pv"] ||
+            [normalizedKey isEqualToString:@"platform"] ||
+            [normalizedKey isEqualToString:@"platformversion"]) {
+            if (!parse_uint64(value, &parsed) || parsed > UINT32_MAX) {
+                if (err) *err = vm_config_error([NSString stringWithFormat:@"invalid platform version '%@'", value]);
+                return NO;
+            }
+            override[@"platformVersion"] = @((unsigned int)parsed);
+        } else if ([normalizedKey isEqualToString:@"board"] ||
+                   [normalizedKey isEqualToString:@"boardid"]) {
+            if (!parse_uint64(value, &parsed) || parsed > UINT32_MAX) {
+                if (err) *err = vm_config_error([NSString stringWithFormat:@"invalid board id '%@'", value]);
+                return NO;
+            }
+            override[@"boardID"] = @((unsigned int)parsed);
+        } else if ([normalizedKey isEqualToString:@"isa"]) {
+            if (!parse_uint64(value, &parsed)) {
+                if (err) *err = vm_config_error([NSString stringWithFormat:@"invalid ISA '%@'", value]);
+                return NO;
+            }
+            override[@"isa"] = @((unsigned long long)parsed);
+        } else if ([normalizedKey isEqualToString:@"variant"] ||
+                   [normalizedKey isEqualToString:@"variantid"]) {
+            NSString *variantID = value;
+            NSString *variantName = nil;
+            NSRange colon = [value rangeOfString:@":"];
+            if (colon.location != NSNotFound) {
+                variantID = trim_string([value substringToIndex:colon.location]);
+                variantName = trim_string([value substringFromIndex:colon.location + 1]);
+            }
+            if (!parse_uint64(variantID, &parsed) || parsed > UINT32_MAX) {
+                if (err) *err = vm_config_error([NSString stringWithFormat:@"invalid variant id '%@'", variantID]);
+                return NO;
+            }
+            override[@"variantID"] = @((unsigned int)parsed);
+            if (variantName && [variantName length])
+                override[@"variantName"] = variantName;
+        } else if ([normalizedKey isEqualToString:@"variantname"] ||
+                   [normalizedKey isEqualToString:@"name"]) {
+            override[@"variantName"] = value;
+        } else {
+            if (err) *err = vm_config_error([NSString stringWithFormat:@"unknown hardware model key '%@'", key]);
+            return NO;
+        }
+    }
+
+    if (!override[@"platformVersion"]) {
+        if (err) *err = vm_config_error(@"hardware model specification must include pv=<n>");
+        return NO;
+    }
+    hardwareModelOverride = [override copy];
+    return YES;
 }
 
 - (void) addNetwork: (NSString*) type interface: (NSString*) iface {
@@ -350,6 +490,91 @@ void add_unlink_on_exit(const char *fn); /* from main.m - a bit hacky but more s
     NSLog(@"WARNING: ECID not known and cannot be inferred from auxiliary storage!");
     return nil;
 }
+
+#ifdef MACOS_GUEST
+- (NSString *) hardwareModelDescription: (VZMacHardwareModel *) model {
+    NSMutableArray *parts = [NSMutableArray arrayWithCapacity:5];
+    NSDictionary *plist = nil;
+    if (model.dataRepresentation) {
+        plist = [NSPropertyListSerialization propertyListWithData:model.dataRepresentation
+                                                          options:NSPropertyListImmutable
+                                                           format:NULL
+                                                            error:NULL];
+    }
+
+    NSNumber *pv = plist[@"PlatformVersion"];
+    if (pv)
+        [parts addObject:[NSString stringWithFormat:@"pv=%u", [pv unsignedIntValue]]];
+
+    NSNumber *board = plist[@"BoardID"];
+    if (!board && [model respondsToSelector:@selector(_boardID)])
+        board = @([model _boardID]);
+    if (board)
+        [parts addObject:[NSString stringWithFormat:@"board=0x%x", [board unsignedIntValue]]];
+
+    NSNumber *isa = plist[@"ISA"];
+    if (!isa && [model respondsToSelector:@selector(_isa)])
+        isa = @([model _isa]);
+    if (isa)
+        [parts addObject:[NSString stringWithFormat:@"isa=%lld", [isa longLongValue]]];
+
+    NSNumber *variantID = plist[@"VariantID"];
+    if (!variantID && [model respondsToSelector:@selector(_variantID)])
+        variantID = @([model _variantID]);
+    NSString *variantName = plist[@"VariantName"];
+    if (!variantName && [model respondsToSelector:@selector(_variantName)])
+        variantName = [model _variantName];
+    if (variantID && [variantID unsignedIntValue])
+        [parts addObject:[NSString stringWithFormat:@"variant=0x%x%@", [variantID unsignedIntValue],
+                          variantName ? [NSString stringWithFormat:@":%@", variantName] : @""]];
+
+    [parts addObject:[NSString stringWithFormat:@"supported=%@", model.isSupported ? @"yes" : @"no"]];
+    return [parts componentsJoinedByString:@","];
+}
+
+- (VZMacHardwareModel *) hardwareModelFromOverride {
+    if (!hardwareModelOverride)
+        return nil;
+
+    Class descriptorClass = NSClassFromString(@"_VZMacHardwareModelDescriptor");
+    if (!descriptorClass) {
+        @throw [NSException exceptionWithName:@"VMConfigHardwareModelError"
+                                       reason:@"_VZMacHardwareModelDescriptor is not available in this Virtualization.framework"
+                                     userInfo:nil];
+    }
+
+    _VZMacHardwareModelDescriptor *desc = [[descriptorClass alloc] init];
+    NSNumber *platformVersion = hardwareModelOverride[@"platformVersion"];
+    NSNumber *boardID = hardwareModelOverride[@"boardID"];
+    NSNumber *isa = hardwareModelOverride[@"isa"];
+    NSNumber *variantID = hardwareModelOverride[@"variantID"];
+    NSString *variantName = hardwareModelOverride[@"variantName"];
+
+    [desc setPlatformVersion:platformVersion];
+    if (boardID)
+        [desc setBoardID:boardID];
+    if (isa)
+        [desc setISA:isa];
+    if (variantID)
+        [desc setVariantID:[variantID unsignedIntValue] variantName:variantName ? variantName : @""];
+
+    VZMacHardwareModel *model = [VZMacHardwareModel _hardwareModelWithDescriptor:desc];
+    if (!model) {
+        @throw [NSException exceptionWithName:@"VMConfigHardwareModelError"
+                                       reason:@"failed to create private Mac hardware model"
+                                     userInfo:nil];
+    }
+
+    NSString *description = [self hardwareModelDescription:model];
+    NSLog(@" + private hardware model override: %@", description);
+    if (!model.isSupported) {
+        @throw [NSException exceptionWithName:@"VMConfigHardwareModelError"
+                                       reason:[NSString stringWithFormat:@"private Mac hardware model is not supported: %@", description]
+                                     userInfo:nil];
+    }
+    return model;
+}
+#endif
 
 - (instancetype) configure {
     if (!os)
@@ -721,11 +946,21 @@ void add_unlink_on_exit(const char *fn); /* from main.m - a bit hacky but more s
 #endif
 
 #ifdef MACOS_GUEST
-    VZMacHardwareModel *hwm = hardwareModelData ? [[VZMacHardwareModel alloc] initWithDataRepresentation:hardwareModelData] : nil;
+    VZMacHardwareModel *hwm = nil;
+
+    if (macPlatform && hardwareModelOverride) {
+        hwm = [self hardwareModelFromOverride];
+        hardwareModelData = hwm.dataRepresentation;
+    }
 
     if (macPlatform && !hardwareModelData) {
         fprintf(stderr, "WARNING: no hardware information found, using arm64 macOS 12.0.0 specs\n");
         hardwareModelData = [[NSData alloc] initWithBase64EncodedString: @"YnBsaXN0MDDTAQIDBAUGXxAZRGF0YVJlcHJlc2VudGF0aW9uVmVyc2lvbl8QD1BsYXRmb3JtVmVyc2lvbl8QEk1pbmltdW1TdXBwb3J0ZWRPUxQAAAAAAAAAAAAAAAAAAAABEAKjBwgIEAwQAAgPKz1SY2VpawAAAAAAAAEBAAAAAAAAAAkAAAAAAAAAAAAAAAAAAABt" options:0];
+    }
+    if (macPlatform && !hwm && hardwareModelData) {
+        hwm = [[VZMacHardwareModel alloc] initWithDataRepresentation:hardwareModelData];
+        if (hwm)
+            NSLog(@" + hardware model: %@", [self hardwareModelDescription:hwm]);
     }
 #endif
 
