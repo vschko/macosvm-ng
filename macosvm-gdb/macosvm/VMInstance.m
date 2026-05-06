@@ -550,11 +550,11 @@ void add_unlink_on_exit(const char *fn); /* from main.m - a bit hacky but more s
     NSNumber *variantID = hardwareModelOverride[@"variantID"];
     NSString *variantName = hardwareModelOverride[@"variantName"];
 
-    [desc setPlatformVersion:platformVersion];
+    [desc setPlatformVersion:[platformVersion unsignedIntValue]];
     if (boardID)
-        [desc setBoardID:boardID];
+        [desc setBoardID:[boardID unsignedIntValue]];
     if (isa)
-        [desc setISA:isa];
+        [desc setISA:[isa longLongValue]];
     if (variantID)
         [desc setVariantID:[variantID unsignedIntValue] variantName:variantName ? variantName : @""];
 

@@ -48,9 +48,9 @@
 
 #ifdef MACOS_GUEST
 @interface _VZMacHardwareModelDescriptor : NSObject
-- (void)setPlatformVersion:(NSNumber * _Nonnull)version;
-- (void)setBoardID:(NSNumber * _Nonnull)boardID;
-- (void)setISA:(NSNumber * _Nonnull)isa;
+- (void)setPlatformVersion:(uint32_t)version;
+- (void)setBoardID:(uint32_t)boardID;
+- (void)setISA:(int64_t)isa;
 - (void)setVariantID:(unsigned int)variantID variantName:(NSString * _Nonnull)variantName;
 @end
 
